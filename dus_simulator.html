@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>DUS 레이어 슬라이싱 시뮬레이터</title>
+    <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+    <style>
+        body {
+            font-family: 'Pretendard', 'Malgun Gothic', sans-serif;
+            background-color: #f8f9fa;
+            text-align: center;
+            padding: 20px;
+            color: #212529;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+        }
+        .controls {
+            display: flex;
+            justify-content: space-around;
+            background: #f1f3f5;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        .slider-group {
+            width: 45%;
+            text-align: left;
+        }
+        input[type=range] {
+            width: 100%;
+            cursor: pointer;
+            accent-color: #5b82ff;
+        }
+        label {
+            font-weight: bold;
+            font-size: 1.1rem;
+            color: #495057;
+            display: block;
+            margin-bottom: 10px;
+        }
+        .highlight { color: #5b82ff; font-weight: 900; font-size: 1.3rem;}
+        .highlight-red { color: #ff6b6b; font-weight: 900; font-size: 1.3rem;}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 style="margin-bottom: 5px;">🧩 실시간 DUS 레이어 병합 시뮬레이터</h1>
+        <p style="color: #868e96; margin-bottom: 30px;">슬라이더를 드래그하여 레이어가 잘리고 합쳐지는 과정을 실시간으로 확인하세요.</p>
+
+        <div class="controls">
+            <div class="slider-group">
+                <label for="baseSlider">Base Model 전체 레이어 수 (L): <span id="baseText" class="highlight">32</span></label>
+                <input type="range" id="baseSlider" min="16" max="64" step="1" value="32">
+            </div>
+            <div class="slider-group">
+                <label for="dropSlider">잘라낼 레이어 수 (m): <span id="dropText" class="highlight-red">8</span></label>
+                <input type="range" id="dropSlider" min="4" max="16" step="1" value="8">
+            </div>
+        </div>
+
+        <div style="font-size: 1.5rem; font-weight: bold; margin: 20px 0; padding: 15px; border: 2px dashed #ced4da; border-radius: 10px;">
+            ✨ 최종 결합된 모델: <span id="finalLayersText" style="color: #7950f2; font-size: 1.8rem;">48</span> Layers
+        </div>
+
+        <div id="graph"></div>
+    </div>
+
+    <script>
+        function drawPlot() {
+            // 1. 슬라이더 값 가져오기
+            let baseLayers = parseInt(document.getElementById('baseSlider').value);
+            let dropLayers = parseInt(document.getElementById('dropSlider').value);
+
+            // 수학적 오류 방지: 잘라내는 레이어가 전체의 절반을 넘지 않도록 제한
+            if (dropLayers >= baseLayers / 2) {
+                dropLayers = Math.floor(baseLayers / 2) - 1;
+                if (dropLayers < 0) dropLayers = 0;
+            }
+
+            // 2. 레이어 구간 계산
+            const modelAEnd = baseLayers - dropLayers;
+            const overlapSize = baseLayers - (2 * dropLayers);
+            const finalLayers = 2 * (baseLayers - dropLayers);
+
+            // 텍스트 UI 업데이트
+            document.getElementById('baseText').innerText = baseLayers;
+            document.getElementById('dropText').innerText = dropLayers;
+            document.getElementById('finalLayersText').innerText = finalLayers;
+
+            const xLabels = ['Base Model', 'Slice A (하단)', 'Slice B (상단)'];
+
+            // 3. 그래프 블록(Trace) 생성
+            // Trace 0: 간격 띄우기 (Slice B 상단 위치 고정을 위한 투명 블록)
+            const trace0 = {
+                x: xLabels, y: [0, 0, dropLayers],
+                type: 'bar', marker: {color: 'rgba(0,0,0,0)'},
+                showlegend: false, hoverinfo: 'none'
+            };
+
+            // Trace 1: Base Model
+            const trace1 = {
+                x: xLabels, y: [baseLayers, 0, 0],
+                name: 'Base Layers', type: 'bar', marker: {color: '#3b3b45'},
+                text: [`0 ~ ${baseLayers-1} Layers`, '', ''], textposition: 'inside',
+                insidetextfont: {color: 'white', size: 14}
+            };
+
+            // Trace 2: Slice A 고유 레이어
+            const trace2 = {
+                x: xLabels, y: [0, dropLayers, 0],
+                name: 'Model A Slice (Unique)', type: 'bar', marker: {color: '#5b82ff'},
+                text: ['', `0 ~ ${dropLayers-1}`, ''], textposition: 'inside',
+                insidetextfont: {color: 'white', size: 14}
+            };
+
+            // Trace 3: 교집합 (Preserved Context)
+            const trace3 = {
+                x: xLabels, y: [0, overlapSize, overlapSize],
+                name: `Preserved Context (총 ${overlapSize}개 유지)`, type: 'bar', marker: {color: '#ff6b6b'},
+                text: ['', `${dropLayers} ~ ${modelAEnd-1}`, `${dropLayers} ~ ${modelAEnd-1}`], textposition: 'inside',
+                insidetextfont: {color: 'white', size: 14}
+            };
+
+            // Trace 4: Slice B 고유 레이어
+            const trace4 = {
+                x: xLabels, y: [0, 0, dropLayers],
+                name: 'Model B Slice (Unique)', type: 'bar', marker: {color: '#51cf66'},
+                text: ['', '', `${modelAEnd} ~ ${baseLayers-1}`], textposition: 'inside',
+                insidetextfont: {color: 'white', size: 14}
+            };
+
+            // 4. 레이아웃 디자인
+            const layout = {
+                barmode: 'stack',
+                height: 550,
+                yaxis: {title: 'Layer Index', showgrid: false, zeroline: false},
+                xaxis: {showgrid: false, tickfont: {size: 16, weight: 'bold'}},
+                margin: {l: 50, r: 50, t: 20, b: 100},
+                legend: {orientation: 'h', yanchor: 'top', y: -0.1, xanchor: 'center', x: 0.5},
+                plot_bgcolor: 'rgba(0,0,0,0)',
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                hovermode: false
+            };
+
+            // Plotly 초고속 렌더링
+            Plotly.react('graph', [trace0, trace1, trace2, trace3, trace4], layout);
+        }
+
+        // 초기 화면 렌더링
+        drawPlot();
+
+        // 슬라이더 실시간 이벤트 리스너 연결
+        document.getElementById('baseSlider').addEventListener('input', drawPlot);
+        document.getElementById('dropSlider').addEventListener('input', drawPlot);
+    </script>
+</body>
+</html>

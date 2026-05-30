@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>cPT 텐서 정렬 시뮬레이터</title>
+    <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+    <style>
+        body {
+            font-family: 'Pretendard', 'Malgun Gothic', sans-serif;
+            background-color: #f1f3f5;
+            text-align: center;
+            padding: 30px;
+            color: #343a40;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            padding: 40px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+        .slider-container { margin: 40px 0; }
+        input[type=range] {
+            width: 80%;
+            cursor: pointer;
+            accent-color: #7950f2;
+        }
+        .metrics {
+            display: flex;
+            justify-content: space-around;
+            margin-top: 20px;
+            font-size: 1.2rem;
+            font-weight: bold;
+        }
+        .metric-box {
+            padding: 15px 30px;
+            border-radius: 10px;
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            width: 30%;
+        }
+        .loss { color: #e03131; }
+        .align { color: #2b8a3e; }
+        h2 { color: #212529; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>🧠 cPT (연속 사전 학습) 텐서 정렬 시뮬레이터</h2>
+        <p style="color: #868e96; font-size: 1.05rem;">
+            슬라이더를 드래그하여 절단면에서 발생하는 <b>'텐서 불일치(Discrepancy)'</b>가<br>학습을 통해 어떻게 치유(Healing)되는지 확인해 보세요.
+        </p>
+
+        <div class="slider-container">
+            <label for="progressSlider" style="font-weight: 800; font-size: 1.2rem; color: #7950f2;">
+                ▶ cPT 학습 진행률: <span id="progressText">0</span>%
+            </label><br><br>
+            <input type="range" id="progressSlider" min="0" max="100" value="0">
+        </div>
+
+        <div class="metrics">
+            <div class="metric-box loss">📉 Loss (손실값)<br><span id="lossValue" style="font-size: 1.8rem;">12.50</span></div>
+            <div class="metric-box align">🎯 Alignment Score<br><span id="alignValue" style="font-size: 1.8rem;">0</span>%</div>
+        </div>
+
+        <div id="graph" style="margin-top: 30px;"></div>
+    </div>
+
+    <script>
+        // 정규 분포(가우시안) PDF 계산 함수
+        function normalPDF(x, mean, std) {
+            return (1 / (std * Math.sqrt(2 * Math.PI))) * Math.exp(-0.5 * Math.pow((x - mean) / std, 2));
+        }
+
+        // X축 데이터 생성 (-10 부터 10 까지)
+        const xValues = [];
+        for (let i = -10; i <= 10; i += 0.1) xValues.push(i);
+
+        // 그래프 렌더링 함수
+        function drawPlot(progress) {
+            const p = progress / 100; // 0.0 ~ 1.0
+
+            // 1. 분포 이동 로직 (학습이 진행될수록 중앙(0)으로 수렴하며 모양이 맞춰짐)
+            // Layer 23 (마라톤 주자): 넓고 왼쪽(-4)에 치우쳐 있다가 중앙으로 좁혀짐
+            const mean23 = -4 * (1 - p);
+            const std23 = 1.5 - 0.5 * p;
+
+            // Layer 8 (단거리 주자): 좁고 오른쪽(4)에 치우쳐 있다가 중앙으로 옴
+            const mean8 = 4 * (1 - p);
+            const std8 = 1.0; // Layer 8은 기대하는 형태를 유지하려 함
+
+            // Y축 데이터 계산
+            const y23 = xValues.map(x => normalPDF(x, mean23, std23));
+            const y8 = xValues.map(x => normalPDF(x, mean8, std8));
+
+            // 2. 그래프 디자인 설정
+            const trace1 = {
+                x: xValues, y: y23,
+                fill: 'tozeroy', type: 'scatter',
+                name: 'Layer 23 출력 (마라톤 주자의 바통)',
+                line: { color: 'rgba(91, 130, 255, 0.9)', width: 3 },
+                fillcolor: 'rgba(91, 130, 255, 0.4)'
+            };
+
+            const trace2 = {
+                x: xValues, y: y8,
+                fill: 'tozeroy', type: 'scatter',
+                name: 'Layer 8 기대 입력 (단거리 주자의 손)',
+                line: { color: 'rgba(255, 127, 127, 0.9)', width: 3 },
+                fillcolor: 'rgba(255, 127, 127, 0.4)'
+            };
+
+            const layout = {
+                title: '<b>텐서 데이터 분포의 괴리와 정렬 과정</b>',
+                xaxis: { title: '텐서 값 (Tensor Value)', range: [-8, 8], zeroline: false },
+                yaxis: { title: '데이터 밀도', range: [0, 0.5], showticklabels: false, zeroline: false },
+                margin: { t: 60, b: 60, l: 40, r: 40 },
+                legend: { orientation: 'h', y: -0.15, x: 0.5, xanchor: 'center' },
+                plot_bgcolor: '#ffffff',
+                paper_bgcolor: '#ffffff',
+                hovermode: false // 호버 툴팁 끄기 (드래그 시 더 부드럽게)
+            };
+
+            // Plotly를 사용해 초고속 리렌더링
+            Plotly.react('graph', [trace1, trace2], layout);
+
+            // 3. 텍스트 지표 업데이트 로직
+            const loss = (12.4 * Math.pow(1 - p, 2) + 0.1).toFixed(2);
+            document.getElementById('progressText').innerText = progress;
+            document.getElementById('lossValue').innerText = loss;
+            document.getElementById('alignValue').innerText = progress;
+        }
+
+        // 브라우저가 열리면 초기(0%) 상태 렌더링
+        drawPlot(0);
+
+        // 🔥 핵심: 슬라이더를 드래그하는 '순간마다' 실시간으로 그래프 업데이트
+        document.getElementById('progressSlider').addEventListener('input', function(e) {
+            // requestAnimationFrame을 쓰지 않아도 Plotly.react가 충분히 빠름
+            drawPlot(e.target.value);
+        });
+    </script>
+</body>
+</html>

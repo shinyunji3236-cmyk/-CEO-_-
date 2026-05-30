@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>텐서(Tensor) 정렬 시뮬레이터</title>
+    <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+    <style>
+        body {
+            font-family: 'Pretendard', 'Malgun Gothic', sans-serif;
+            background-color: #f4f6f8;
+            text-align: center;
+            padding: 20px;
+            color: #2c3e50;
+        }
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+            background: white;
+            padding: 35px;
+            border-radius: 16px;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.05);
+        }
+        .header-box {
+            background: #eef2f5;
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+            text-align: left;
+        }
+        .slider-container { margin: 30px 0; background: #fff; padding: 20px; border: 1px solid #e1e4e8; border-radius: 12px;}
+        input[type=range] {
+            width: 80%;
+            cursor: pointer;
+            accent-color: #e74c3c;
+        }
+        .metrics {
+            display: flex;
+            justify-content: space-around;
+            margin-top: 15px;
+        }
+        .metric-box {
+            padding: 20px;
+            border-radius: 12px;
+            width: 40%;
+            font-weight: bold;
+            font-size: 1.2rem;
+        }
+        .metric-progress { background: #e8f8f5; color: #16a085; border: 1px solid #a3e4d7; }
+        .metric-loss { background: #fdedec; color: #c0392b; border: 1px solid #f5b7b1; }
+        .highlight { color: #3498db; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 텐서(Tensor) 불일치 및 cPT 치유 시뮬레이터</h1>
+
+        <div class="header-box">
+            <b>💡 텐서(Tensor)란?</b> 모델 내부를 흐르는 '숫자들의 배열'입니다. 여기서는 10x10 격자의 색상(숫자 크기)으로 표현했습니다.<br><br>
+            <b>⚠️ 텐서 불안정성(Discrepancy)이란?</b> Model A(Layer 23)가 뱉어내는 텐서 모양(숫자 패턴)과, Model B(Layer 8)가 기대하는 텐서 모양이 완전히 달라서 충돌하는 현상입니다.
+        </div>
+
+        <div class="slider-container">
+            <label style="font-weight: 800; font-size: 1.3rem; color: #2c3e50;">
+                ▶ 연속 사전 학습(cPT) 진행률: <span id="progressText" style="color: #e74c3c;">0</span>%
+            </label><br><br>
+            <input type="range" id="progressSlider" min="0" max="100" value="0">
+
+            <div class="metrics">
+                <div class="metric-box metric-progress">
+                    🔄 학습 완료도<br><span id="alignValue" style="font-size: 2rem;">0%</span>
+                </div>
+                <div class="metric-box metric-loss">
+                    📉 텐서 충돌 오차 (Loss)<br><span id="lossValue" style="font-size: 2rem;">0.00</span>
+                </div>
+            </div>
+        </div>
+
+        <div id="graph" style="margin-top: 20px;"></div>
+    </div>
+
+    <script>
+        const size = 10;
+        let tensorInitial = []; // Layer 23이 원래 출력하던 형태 (좌측 상단에 값이 몰려있음)
+        let tensorTarget = [];  // Layer 8이 기대하는 형태 (우측 하단에 값이 몰려있음)
+
+        // 가상의 텐서 데이터 생성 (2D 가우시안 분포 활용)
+        for(let i=0; i<size; i++) {
+            let rowI = [], rowT = [];
+            for(let j=0; j<size; j++) {
+                let valI = Math.exp(-(Math.pow(i-2, 2) + Math.pow(j-2, 2))/10);
+                let valT = Math.exp(-(Math.pow(i-7, 2) + Math.pow(j-7, 2))/10);
+                rowI.push(valI);
+                rowT.push(valT);
+            }
+            tensorInitial.push(rowI);
+            tensorTarget.push(rowT);
+        }
+
+        function drawPlot(progress) {
+            const p = progress / 100;
+            let tensorCurrent = [];
+            let tensorError = [];
+            let totalLoss = 0;
+
+            for(let i=0; i<size; i++) {
+                let rowC = [], rowE = [];
+                for(let j=0; j<size; j++) {
+                    // 학습(cPT)이 진행될수록 Initial 패턴에서 Target 패턴으로 서서히 변환됨
+                    // 초기에는 노이즈(불안정성)가 심하지만, 학습이 진행될수록 안정화됨
+                    let noise = (Math.random() - 0.5) * 0.3 * (1 - p);
+                    let currentVal = tensorInitial[i][j] * (1 - p) + tensorTarget[i][j] * p + noise;
+
+                    // 값의 범위를 0~1로 제한
+                    currentVal = Math.max(0, Math.min(1, currentVal));
+                    let targetVal = tensorTarget[i][j];
+
+                    // 오차(Loss) 계산 = |현재 텐서값 - 기대하는 텐서값|
+                    let err = Math.abs(currentVal - targetVal);
+
+                    rowC.push(currentVal);
+                    rowE.push(err);
+                    totalLoss += err;
+                }
+                tensorCurrent.push(rowC);
+                tensorError.push(rowE);
+            }
+
+            // 1. 현재 레이어를 통과하는 텐서 (모양이 변함)
+            const trace1 = {
+                z: tensorCurrent, type: 'heatmap', colorscale: 'Viridis',
+                xaxis: 'x1', yaxis: 'y1', showscale: false, zmin: 0, zmax: 1,
+                hoverinfo: 'none'
+            };
+
+            // 2. 다음 레이어가 기대하는 텐서 (모양 고정)
+            const trace2 = {
+                z: tensorTarget, type: 'heatmap', colorscale: 'Viridis',
+                xaxis: 'x2', yaxis: 'y2', showscale: false, zmin: 0, zmax: 1,
+                hoverinfo: 'none'
+            };
+
+            // 3. 두 텐서 간의 차이 (오차/Loss - 붉은색이 진할수록 심각함)
+            const trace3 = {
+                z: tensorError, type: 'heatmap', colorscale: 'Reds',
+                xaxis: 'x3', yaxis: 'y3', showscale: true, zmin: 0, zmax: 1,
+                colorbar: {title: '오차 크기'}, hoverinfo: 'none'
+            };
+
+            const layout = {
+                grid: { rows: 1, columns: 3, pattern: 'independent' },
+                annotations: [
+                    // xref를 'x1 domain' 등으로 설정해 각 그래프의 정중앙(0.5)에 완벽히 고정합니다.
+                    { text: '<b>[Model A] Layer 23 출력</b><br>(변화하는 텐서)', x: 0.5, y: 1.15, xref: 'x1 domain', yref: 'paper', showarrow: false, font: {size: 14} },
+                    { text: '<b>[Model B] Layer 8 기대치</b><br>(고정된 타겟)', x: 0.5, y: 1.15, xref: 'x2 domain', yref: 'paper', showarrow: false, font: {size: 14} },
+                    { text: '<b>🚨 텐서 충돌 오차 (Loss)</b><br>(붉은색이 불안정성)', x: 0.5, y: 1.15, xref: 'x3 domain', yref: 'paper', showarrow: false, font: {size: 14, color: '#c0392b'} }
+                ],
+                xaxis1: {showticklabels: false, visible: false}, yaxis1: {showticklabels: false, visible: false},
+                xaxis2: {showticklabels: false, visible: false}, yaxis2: {showticklabels: false, visible: false},
+                xaxis3: {showticklabels: false, visible: false}, yaxis3: {showticklabels: false, visible: false},
+                height: 450,
+                // 위쪽 마진(t)을 90에서 120으로 넉넉하게 늘려 텍스트가 들어갈 공간을 확보합니다.
+                margin: { t: 120, b: 20, l: 10, r: 10 },
+                plot_bgcolor: 'rgba(0,0,0,0)', paper_bgcolor: 'rgba(0,0,0,0)'
+            };
+
+            Plotly.react('graph', [trace1, trace2, trace3], layout);
+
+            // 텍스트 UI 업데이트
+            document.getElementById('progressText').innerText = progress;
+            document.getElementById('alignValue').innerText = progress + '%';
+            document.getElementById('lossValue').innerText = totalLoss.toFixed(2);
+        }
+
+        drawPlot(0); // 초기 렌더링
+
+        // 실시간 드래그 이벤트 (60fps 수준으로 부드럽게 변환)
+        document.getElementById('progressSlider').addEventListener('input', function(e) {
+            drawPlot(e.target.value);
+        });
+    </script>
+</body>
+</html>
